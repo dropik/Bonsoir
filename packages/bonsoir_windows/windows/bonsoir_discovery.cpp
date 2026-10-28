@@ -56,7 +56,10 @@ namespace bonsoir_windows {
       }
       resolvingServices.clear();
     }
-    services.clear();
+    {
+      const std::lock_guard<std::recursive_mutex> servicesLock(servicesMutex);
+      services.clear();
+    }
     DnsServiceBrowseCancel(&cancelHandle);
   }
 
@@ -70,6 +73,8 @@ namespace bonsoir_windows {
   }
 
   void BonsoirDiscovery::resolveService(std::string serviceName, std::string serviceType) {
+    // Held across DnsServiceResolve, so that resolveCallback can't run before the cancel handle is recorded.
+    const std::lock_guard<std::recursive_mutex> servicesLock(servicesMutex);
     std::shared_ptr<BonsoirService> servicePtr = findService(serviceName, serviceType);
     if (servicePtr == nullptr) {
       onError(nullptr, std::list<std::string>{serviceName, serviceType}, logMessages.find(Generated::discoveryUndiscoveredServiceResolveFailed)->second);
@@ -86,8 +91,10 @@ namespace bonsoir_windows {
     resolveRequest.pQueryContext = this;
     DNS_STATUS status = DnsServiceResolve(&resolveRequest, resolveCancelHandle);
     if (status == DNS_REQUEST_PENDING) {
+      const std::lock_guard<std::mutex> cleanupLock(resolvingServicesCleanupMutex);
       resolvingServices[servicePtr] = resolveCancelHandle;
     } else {
+      delete resolveCancelHandle;
       onSuccess(Generated::discoveryServiceResolveFailed, servicePtr, std::list<std::string>{std::to_string(status)});
     }
   }
@@ -112,6 +119,7 @@ namespace bonsoir_windows {
       return;
     }
 
+    const std::lock_guard<std::recursive_mutex> servicesLock(discovery->servicesMutex);
     auto serviceData = parseBonjourFqdn(toUtf8(dnsRecord->Data.PTR.pNameHost));
     std::string name = std::get<0>(serviceData);
     std::string type = std::get<1>(serviceData);
@@ -194,6 +202,7 @@ namespace bonsoir_windows {
 
   void resolveCallback(DWORD status, PVOID context, PDNS_SERVICE_INSTANCE serviceInstance) {
     auto discovery = (BonsoirDiscovery *)context;
+    const std::lock_guard<std::recursive_mutex> servicesLock(discovery->servicesMutex);
     std::shared_ptr<BonsoirService> servicePtr = nullptr;
     std::tuple<std::string, std::string> serviceData = {"NULL", "NULL"};
     if (serviceInstance && serviceInstance->pszInstanceName) {

@@ -171,8 +171,10 @@ namespace bonsoir_windows {
   EventObject::EventObject(std::string _message)
     : message(_message) {}
 
+  // Keeps a copy of the service: the event is serialized later on the platform thread, while the
+  // DNS-SD callbacks may still change the original.
   SuccessObject::SuccessObject(std::string _id, std::string _message, std::shared_ptr<BonsoirService> _service)
-    : EventObject(_message), id(_id), service(_service) {}
+    : EventObject(_message), id(_id), service(_service ? std::make_shared<BonsoirService>(*_service) : nullptr) {}
 
   void SuccessObject::process(BonsoirAction *action) {
     action->eventSink->Success(toEncodable());

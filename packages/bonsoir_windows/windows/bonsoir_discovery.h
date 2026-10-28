@@ -9,6 +9,9 @@ namespace bonsoir_windows {
     std::list<std::shared_ptr<BonsoirService>> services;
     std::map<std::shared_ptr<BonsoirService>, PDNS_SERVICE_CANCEL> resolvingServices = std::map<std::shared_ptr<BonsoirService>, PDNS_SERVICE_CANCEL>{};
     std::mutex resolvingServicesCleanupMutex;
+    // Guards `services` and every service in it, which the DNS-SD callbacks change on the thread
+    // pool while the platform thread reads them. Always taken before resolvingServicesCleanupMutex.
+    std::recursive_mutex servicesMutex;
 
     BonsoirDiscovery(
       int _id,
